@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-// MockNetConn is an implementation of the net.Conn interface for testing
 type MockNetConn struct {
 	ReadBuffer  bytes.Buffer
 	WriteBuffer bytes.Buffer
@@ -67,8 +66,6 @@ func TestConnection_Auth(t *testing.T) {
 
 	t.Run("simulate an authentication failure", func(t *testing.T) {
 		conn := newMockConnection("-ERR invalid password\r\n", new(bytes.Buffer), time.Time{})
-		// Since MockNetConn does not have a method to return its ReadBuffer directly,
-		// we use `conn.rw.Reader` which is a bufio.Reader wrapping the ReadBuffer.
 		readContents, _ := conn.rw.Reader.ReadString('\n')
 		fmt.Printf("Buffer content before ReadString call: %q\n", readContents)
 		err := conn.Auth(context.Background(), "wrong-password")
@@ -115,7 +112,7 @@ func TestConnection_Send(t *testing.T) {
 		commandToSend := "SET key value"
 
 		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // Cancel the context immediately
+		cancel() // Cancel the context
 
 		mockConn := newMockConnection("", new(bytes.Buffer), time.Time{})
 		err := mockConn.Send(ctx, commandToSend)
@@ -177,7 +174,7 @@ func TestConnection_Receive(t *testing.T) {
 	t.Run("receive with canceled context", func(t *testing.T) {
 		conn := newMockConnection("+OK\r\n", new(bytes.Buffer), time.Time{})
 		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // cancel context immediately
+		cancel()
 
 		_, err := conn.Receive(ctx)
 		if err == nil {
