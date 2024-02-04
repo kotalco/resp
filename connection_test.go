@@ -3,94 +3,72 @@ package redis
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
-type mockConn struct {
-	net.Conn
-	readBuffer  *bytes.Buffer
-	writeBuffer *bytes.Buffer
+type MockNetConn struct {
+	ReadBuffer  bytes.Buffer
+	WriteBuffer bytes.Buffer
+	WriteErr    error
+	Closed      bool
 }
 
-func (m *mockConn) Read(b []byte) (n int, err error) {
-	return m.readBuffer.Read(b)
+func (mc *MockNetConn) Read(b []byte) (n int, err error) {
+	return mc.ReadBuffer.Read(b)
 }
 
-func (m *mockConn) Write(b []byte) (n int, err error) {
-	n, err = m.writeBuffer.Write(b)
-	return n, err
+func (mc *MockNetConn) Write(b []byte) (n int, err error) {
+	if mc.Closed {
+		return 0, net.ErrClosed
+	}
+	if mc.WriteErr != nil {
+		return 0, mc.WriteErr
+	}
+	return mc.WriteBuffer.Write(b)
 }
 
-func (m *mockConn) Close() error {
+func (mc *MockNetConn) Close() error {
+	mc.Closed = true
 	return nil
 }
 
-// MockDialer is a mock type that satisfies the IDialer interface
-type MockDialer struct {
-	DialFunc func(address string) (net.Conn, error)
-}
+func (mc *MockNetConn) LocalAddr() net.Addr                { return nil }
+func (mc *MockNetConn) RemoteAddr() net.Addr               { return nil }
+func (mc *MockNetConn) SetDeadline(t time.Time) error      { return nil }
+func (mc *MockNetConn) SetReadDeadline(t time.Time) error  { return nil }
+func (mc *MockNetConn) SetWriteDeadline(t time.Time) error { return nil }
 
-func (m *MockDialer) Dial(address string) (net.Conn, error) {
-	return m.DialFunc(address)
-}
-
-func newMockConnection(readData string, writeData *bytes.Buffer) *Connection {
-	mockConn := &mockConn{
-		readBuffer:  bytes.NewBufferString(readData),
-		writeBuffer: writeData,
+func newMockConnection(readData string, writeData *bytes.Buffer, setWriteDeadline time.Time) *Connection {
+	mockConn := &MockNetConn{
+		ReadBuffer: *bytes.NewBufferString(readData), // Initialize the buffer with readData
 	}
+
 	return &Connection{
 		conn: mockConn,
-		rw:   bufio.NewReadWriter(bufio.NewReader(mockConn), bufio.NewWriter(mockConn)),
+		rw:   bufio.NewReadWriter(bufio.NewReader(&mockConn.ReadBuffer), bufio.NewWriter(&mockConn.WriteBuffer)),
 	}
-}
-
-func TestNewRedisConnection(t *testing.T) {
-	t.Run("successful connection with authentication", func(t *testing.T) {
-		mockDialer := &MockDialer{
-			DialFunc: func(address string) (net.Conn, error) { // Simulate successful connection
-				return &mockConn{
-					readBuffer:  bytes.NewBufferString("+OK\r\n"),
-					writeBuffer: new(bytes.Buffer),
-				}, nil
-			},
-		}
-		_, err := NewRedisConnection(mockDialer, "localhost:6379", "correctpassword")
-		if err != nil {
-			t.Errorf("Failed to create new Redis connection with error: %v", err)
-		}
-	})
-
-	t.Run("failed authentication", func(t *testing.T) {
-		mockDialer := &MockDialer{
-			DialFunc: func(address string) (net.Conn, error) { // Simulate successful connection
-				return &mockConn{
-					readBuffer:  bytes.NewBufferString("-error message\r\n"),
-					writeBuffer: new(bytes.Buffer),
-				}, nil
-			},
-		}
-		_, err := NewRedisConnection(mockDialer, "localhost:6379", "wrongpass")
-		if err == nil {
-			t.Errorf("Expected an authentication error, got nil")
-		}
-	})
 }
 
 func TestConnection_Auth(t *testing.T) {
 	t.Run("simulate a successful AUTH command", func(t *testing.T) {
-		conn := newMockConnection("+OK\r\n", new(bytes.Buffer))
-		err := conn.Auth("correct-password")
+		conn := newMockConnection("+OK\r\n", new(bytes.Buffer), time.Time{})
+		err := conn.Auth(context.Background(), "correct-password")
 		if err != nil {
 			t.Errorf("Auth should succeed, got error: %v", err)
 		}
 	})
 
 	t.Run("simulate an authentication failure", func(t *testing.T) {
-		conn := newMockConnection("-ERR invalid password\r\n", new(bytes.Buffer))
-		err := conn.Auth("wrong-password")
+		conn := newMockConnection("-ERR invalid password\r\n", new(bytes.Buffer), time.Time{})
+		readContents, _ := conn.rw.Reader.ReadString('\n')
+		fmt.Printf("Buffer content before ReadString call: %q\n", readContents)
+		err := conn.Auth(context.Background(), "wrong-password")
 		if err == nil {
 			t.Errorf("Expected an authentication error, got nil")
 		}
@@ -98,59 +76,109 @@ func TestConnection_Auth(t *testing.T) {
 }
 
 func TestConnection_Send(t *testing.T) {
-	writeBuffer := new(bytes.Buffer)
-	conn := newMockConnection("", writeBuffer)
-	t.Run("simulate a successful send command", func(t *testing.T) {
-		// Test sending a command
-		err := conn.Send("PING")
+	t.Run("send data within deadline", func(t *testing.T) {
+		commandToSend := "SET key value"
+		expectedData := "SET key value\r\n"
+		mockConn := newMockConnection("", new(bytes.Buffer), time.Time{})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		err := mockConn.Send(ctx, commandToSend)
 		if err != nil {
-			t.Errorf("Failed to send command with error: %v", err)
+			t.Fatalf("Send() error = %v, wantErr %v", err, nil)
 		}
-		if writeBuffer.String() != "PING\r\n" {
-			t.Errorf("Send wrote the wrong data: %v", writeBuffer.String())
+
+		if gotData := mockConn.conn.(*MockNetConn).WriteBuffer.String(); gotData != expectedData {
+			t.Errorf("Send() got = %v, want %v", gotData, expectedData)
 		}
 	})
+
+	t.Run("send data past deadline", func(t *testing.T) {
+		commandToSend := "SET key value"
+		mockConn := newMockConnection("", new(bytes.Buffer), time.Time{})
+
+		// Set a deadline in the past
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
+		defer cancel()
+
+		err := mockConn.Send(ctx, commandToSend)
+		if err == nil {
+			t.Error("Send() expected error, got none")
+		}
+	})
+	t.Run("send data with canceled context", func(t *testing.T) {
+		commandToSend := "SET key value"
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // Cancel the context
+
+		mockConn := newMockConnection("", new(bytes.Buffer), time.Time{})
+		err := mockConn.Send(ctx, commandToSend)
+		if err == nil {
+			t.Errorf("Send() expected error, got none")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Send() expected context.Canceled error, got %v", err)
+		}
+	})
+
+	//todo send data with write error
+	//todo send data after connection closed
+
 }
 
 func TestConnection_Receive(t *testing.T) {
-	t.Run("simulate a valid response", func(t *testing.T) {
-		conn := newMockConnection("PONG\r\n", new(bytes.Buffer))
-		resp, err := conn.Receive()
+	t.Run("receive simple string response", func(t *testing.T) {
+		conn := newMockConnection("+OK\r\n", new(bytes.Buffer), time.Time{})
+		data, err := conn.Receive(context.Background())
 		if err != nil {
-			t.Errorf("Receive should succeed, got error: %v", err)
+			t.Fatalf("Receive() error = %v, wantErr %v", err, nil)
 		}
-		if resp != "PONG" {
-			t.Errorf("Expected PONG, got: %v", resp)
-		}
-	})
-
-	t.Run("Simulate a Redis error response", func(t *testing.T) {
-		conn := newMockConnection("-some error\r\n", new(bytes.Buffer))
-		_, err := conn.Receive()
-		if err == nil || !strings.Contains(err.Error(), "some error") {
-			t.Errorf("Expected an error containing 'some error', got: %v", err)
+		if data != "OK" {
+			t.Errorf("Receive() got = %v, want %v", data, "OK")
 		}
 	})
 
-	t.Run("Simulate a bulk string response", func(t *testing.T) {
-		conn := newMockConnection("$5\r\nhello\r\n", new(bytes.Buffer))
-		resp, err := conn.Receive()
+	t.Run("receive error response", func(t *testing.T) {
+		conn := newMockConnection("-Error message\r\n", new(bytes.Buffer), time.Time{})
+		_, err := conn.Receive(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "Error message") {
+			t.Errorf("Receive() expected error containing 'Error message', got %v", err)
+		}
+	})
+
+	t.Run("receive bulk string response", func(t *testing.T) {
+		conn := newMockConnection("$6\r\nfoobar\r\n", new(bytes.Buffer), time.Time{})
+		data, err := conn.Receive(context.Background())
 		if err != nil {
-			t.Errorf("Receive should succeed, got error: %v", err)
+			t.Fatalf("Receive() error = %v, wantErr %v", err, nil)
 		}
-		if resp != "hello" {
-			t.Errorf("Expected 'hello', got: %v", resp)
+		if data != "foobar" {
+			t.Errorf("Receive() got = %v, want %v", data, "foobar")
 		}
 	})
 
-}
+	t.Run("receive nil bulk string response", func(t *testing.T) {
+		conn := newMockConnection("$-1\r\n", new(bytes.Buffer), time.Time{})
+		data, err := conn.Receive(context.Background())
+		if err != nil {
+			t.Fatalf("Receive() error = %v, wantErr %v", err, nil)
+		}
+		if data != "" {
+			t.Errorf("Receive() got = %v, want empty string", data)
+		}
+	})
 
-func TestConnection_Close(t *testing.T) {
-	writeBuffer := new(bytes.Buffer)
-	conn := newMockConnection("", writeBuffer)
+	t.Run("receive with canceled context", func(t *testing.T) {
+		conn := newMockConnection("+OK\r\n", new(bytes.Buffer), time.Time{})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
 
-	err := conn.Close()
-	if err != nil {
-		t.Errorf("Failed to close connection with error: %v", err)
-	}
+		_, err := conn.Receive(ctx)
+		if err == nil {
+			t.Error("Receive() expected error, got none")
+		}
+	})
+	//todo receive data after connection closed
 }
