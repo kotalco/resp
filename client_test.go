@@ -85,14 +85,14 @@ func TestClient_Do(t *testing.T) {
 		return nil
 	}
 	ReceiveFunc = func() (string, error) {
-		return "+OK", nil
+		return "OK", nil
 	}
 	client := newMockClient(2, "password")
 	response, err := client.Do(context.Background(), "PING")
 	if err != nil {
 		t.Errorf("Do returned error: %s", err)
 	}
-	if response != "+OK" {
+	if response != "OK" {
 		t.Errorf("Do did not return +OK, got: %s", response)
 	}
 }
@@ -150,7 +150,7 @@ func TestClient_SetWithTTL(t *testing.T) {
 		return nil
 	}
 	ReceiveFunc = func() (string, error) {
-		return "+OK", nil
+		return "OK", nil
 	}
 	client := newMockClient(2, "password")
 	err := client.SetWithTTL(context.Background(), "key", "value", 1)

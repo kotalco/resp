@@ -75,7 +75,6 @@ func TestConnection_Auth(t *testing.T) {
 	})
 }
 
-// TestConnection_Send tests the Send method of the Connection type
 func TestConnection_Send(t *testing.T) {
 	t.Run("send data within deadline", func(t *testing.T) {
 		commandToSend := "SET key value"

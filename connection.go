@@ -23,7 +23,7 @@ type Connection struct {
 }
 
 func NewRedisConnection(dialer IDialer, address string, auth string) (IConnection, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	conn, err := dialer.Dial(ctx, address)
@@ -66,11 +66,9 @@ func (rc *Connection) Auth(ctx context.Context, password string) error {
 }
 
 func (rc *Connection) Send(ctx context.Context, command string) error {
-	// Check if the context has been canceled before attempting the read operation
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	// Set deadline for write operation based on context's deadline
 	deadline, ok := ctx.Deadline()
 	if !ok { // Default deadline if none is set
 		deadline = time.Now().Add(5 * time.Second)
@@ -88,15 +86,14 @@ func (rc *Connection) Send(ctx context.Context, command string) error {
 }
 
 func (rc *Connection) Receive(ctx context.Context) (string, error) {
-	// Check if the context has been canceled before attempting the read operation
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	// Set deadline for read operation based on context's deadline
 	deadline, ok := ctx.Deadline()
 	if !ok { // Default deadline if none is set
 		deadline = time.Now().Add(5 * time.Second)
 	}
+
 	if err := rc.conn.SetReadDeadline(deadline); err != nil {
 		return "", err
 	}
@@ -106,7 +103,6 @@ func (rc *Connection) Receive(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	// Check the first character of the trimmed line
 	switch line[0] {
 	case '-': // Handle simple error
 		return "", fmt.Errorf(strings.TrimSuffix(line[1:], "\r\n"))
