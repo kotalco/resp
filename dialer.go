@@ -1,9 +1,12 @@
 package redis
 
-import "net"
+import (
+	"context"
+	"net"
+)
 
 type IDialer interface {
-	Dial(address string) (net.Conn, error)
+	Dial(ctx context.Context, address string) (net.Conn, error)
 }
 
 type Dialer struct{}
@@ -11,6 +14,8 @@ type Dialer struct{}
 func NewDialer() IDialer {
 	return &Dialer{}
 }
-func (d Dialer) Dial(address string) (net.Conn, error) {
-	return net.Dial("tcp", address)
+func (d Dialer) Dial(ctx context.Context, address string) (net.Conn, error) {
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, "tcp", address)
+
 }

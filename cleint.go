@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -11,13 +12,13 @@ import (
 type IClient interface {
 	GetConnection() (IConnection, error)
 	ReleaseConnection(conn IConnection)
-	Do(command string) (string, error)
-	Set(key string, value string) error
-	SetWithTTL(key string, value string, ttl int) error
-	Get(key string) (string, error)
-	Delete(key string) error
-	Incr(key string) (int, error)
-	Expire(key string, seconds int) (bool, error)
+	Do(ctx context.Context, command string) (string, error)
+	Set(ctx context.Context, key string, value string) error
+	SetWithTTL(ctx context.Context, key string, value string, ttl int) error
+	Get(ctx context.Context, key string) (string, error)
+	Delete(ctx context.Context, key string) error
+	Incr(ctx context.Context, key string) (int, error)
+	Expire(ctx context.Context, key string, seconds int) (bool, error)
 	Close()
 }
 
@@ -85,43 +86,59 @@ func (client *Client) ReleaseConnection(conn IConnection) {
 	}
 }
 
-func (client *Client) Do(command string) (string, error) {
+func (client *Client) Do(ctx context.Context, command string) (string, error) {
 	conn, err := client.GetConnection()
 	if err != nil {
 		return "", err
 	}
 	defer client.ReleaseConnection(conn)
 
-	err = conn.Send(command)
-	if err != nil {
-		return "", err
+	// Start sending the command in a separate goroutine
+	errChan := make(chan error, 1)
+	replyChan := make(chan string, 1)
+	go func() {
+		err := conn.Send(ctx, command)
+		if err != nil {
+			errChan <- err
+			return
+		}
+
+		reply, err := conn.Receive(ctx)
+		if err != nil {
+			errChan <- err
+		} else {
+			replyChan <- reply
+		}
+	}()
+	// Use select to wait either for the operation to complete or the context to be cancelled
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err() // The context was cancelled
+	case err := <-errChan:
+		return "", err // The redis operation returned an error
+	case reply := <-replyChan:
+		return reply, nil // The redis operation was successful
 	}
 
-	reply, err := conn.Receive()
-	if err != nil {
-		return "", err
-	}
-
-	return reply, nil
 }
 
-func (client *Client) Set(key string, value string) error {
-	response, err := client.Do(fmt.Sprintf("*3\r\n$3\r\nSET\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(value), value))
+func (client *Client) Set(ctx context.Context, key string, value string) error {
+	response, err := client.Do(ctx, fmt.Sprintf("*3\r\n$3\r\nSET\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(value), value))
 	if err != nil {
 		return err
 	}
-	if response != "+OK" {
+	if response != "OK" {
 		return errors.New("unexpected response from server")
 	}
 	return nil
 }
 
-func (client *Client) Incr(key string) (int, error) {
+func (client *Client) Incr(ctx context.Context, key string) (int, error) {
 	// Construct the Redis INCR command
 	command := fmt.Sprintf("*2\r\n$4\r\nINCR\r\n$%d\r\n%s\r\n", len(key), key)
 
 	// Send the command to the Redis server
-	response, err := client.Do(command)
+	response, err := client.Do(ctx, command)
 	if err != nil {
 		return 0, err
 	}
@@ -136,12 +153,12 @@ func (client *Client) Incr(key string) (int, error) {
 	return newValue, nil
 }
 
-func (client *Client) Expire(key string, seconds int) (bool, error) {
+func (client *Client) Expire(ctx context.Context, key string, seconds int) (bool, error) {
 	// Construct the Redis EXPIRE command
 	command := fmt.Sprintf("*3\r\n$6\r\nEXPIRE\r\n$%d\r\n%s\r\n$%d\r\n%d\r\n", len(key), key, len(fmt.Sprintf("%d", seconds)), seconds)
 
 	// Send the command to the Redis server
-	response, err := client.Do(command)
+	response, err := client.Do(ctx, command)
 	if err != nil {
 		return false, err
 	}
@@ -157,8 +174,8 @@ func (client *Client) Expire(key string, seconds int) (bool, error) {
 	}
 }
 
-func (client *Client) SetWithTTL(key string, value string, ttl int) error {
-	response, err := client.Do(fmt.Sprintf("*5\r\n$3\r\nSET\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n$2\r\nEX\r\n$%d\r\n%d\r\n", len(key), key, len(value), value, len(strconv.Itoa(ttl)), ttl))
+func (client *Client) SetWithTTL(ctx context.Context, key string, value string, ttl int) error {
+	response, err := client.Do(ctx, fmt.Sprintf("*5\r\n$3\r\nSET\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n$2\r\nEX\r\n$%d\r\n%d\r\n", len(key), key, len(value), value, len(strconv.Itoa(ttl)), ttl))
 	if err != nil {
 		return err
 	}
@@ -168,17 +185,17 @@ func (client *Client) SetWithTTL(key string, value string, ttl int) error {
 	return nil
 }
 
-func (client *Client) Get(key string) (string, error) {
-	response, err := client.Do(fmt.Sprintf("*2\r\n$3\r\nGET\r\n$%d\r\n%s\r\n", len(key), key))
+func (client *Client) Get(ctx context.Context, key string) (string, error) {
+	response, err := client.Do(ctx, fmt.Sprintf("*2\r\n$3\r\nGET\r\n$%d\r\n%s\r\n", len(key), key))
 	if err != nil {
 		return "", err
 	}
 	return response, nil
 }
 
-func (client *Client) Delete(key string) error {
+func (client *Client) Delete(ctx context.Context, key string) error {
 	cmd := fmt.Sprintf("*2\r\n$3\r\nDEL\r\n$%d\r\n%s\r\n", len(key), key)
-	response, err := client.Do(cmd)
+	response, err := client.Do(ctx, cmd)
 	if err != nil {
 		return err
 	}

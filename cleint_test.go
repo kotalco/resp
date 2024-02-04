@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"context"
 	"testing"
 )
 
@@ -16,15 +17,15 @@ type mockConnection struct {
 	// fields to simulate the Redis connection state
 }
 
-func (m *mockConnection) Auth(password string) error {
+func (m *mockConnection) Auth(ctx context.Context, password string) error {
 	return AuthFunc(password)
 }
 
-func (m *mockConnection) Send(command string) error {
+func (m *mockConnection) Send(ctx context.Context, command string) error {
 	return SendFunc(command)
 }
 
-func (m *mockConnection) Receive() (string, error) {
+func (m *mockConnection) Receive(ctx context.Context) (string, error) {
 	return ReceiveFunc()
 }
 
@@ -87,7 +88,7 @@ func TestClient_Do(t *testing.T) {
 		return "+OK", nil
 	}
 	client := newMockClient(2, "password")
-	response, err := client.Do("PING")
+	response, err := client.Do(context.Background(), "PING")
 	if err != nil {
 		t.Errorf("Do returned error: %s", err)
 	}
@@ -101,10 +102,10 @@ func TestClient_Set(t *testing.T) {
 		return nil
 	}
 	ReceiveFunc = func() (string, error) {
-		return "+OK", nil
+		return "OK", nil
 	}
 	client := newMockClient(2, "password")
-	err := client.Set("key", "value")
+	err := client.Set(context.Background(), "key", "value")
 	if err != nil {
 		t.Errorf("Set returned error: %s", err)
 	}
@@ -118,7 +119,7 @@ func TestClient_Incr(t *testing.T) {
 		return ":1\r\n", nil
 	}
 	client := newMockClient(2, "password")
-	resp, err := client.Incr("key")
+	resp, err := client.Incr(context.Background(), "key")
 	if err != nil {
 		t.Errorf("Incr returned error: %s", err)
 	}
@@ -135,7 +136,7 @@ func TestClient_Expire(t *testing.T) {
 		return ":1", nil
 	}
 	client := newMockClient(2, "password")
-	success, err := client.Expire("key", 1)
+	success, err := client.Expire(context.Background(), "key", 1)
 	if err != nil {
 		t.Errorf("Expire returned error: %s", err)
 	}
@@ -152,7 +153,7 @@ func TestClient_SetWithTTL(t *testing.T) {
 		return "+OK", nil
 	}
 	client := newMockClient(2, "password")
-	err := client.SetWithTTL("key", "value", 1)
+	err := client.SetWithTTL(context.Background(), "key", "value", 1)
 	if err != nil {
 		t.Errorf("Set returned error: %s", err)
 	}
@@ -166,7 +167,7 @@ func TestClient_Get(t *testing.T) {
 		return "value", nil
 	}
 	client := newMockClient(2, "password")
-	resp, err := client.Get("key")
+	resp, err := client.Get(context.Background(), "key")
 	if err != nil {
 		t.Errorf("Get returned error: %s", err)
 	}
@@ -183,7 +184,7 @@ func TestClient_Delete(t *testing.T) {
 		return ":1", nil
 	}
 	client := newMockClient(2, "password")
-	err := client.Delete("key")
+	err := client.Delete(context.Background(), "key")
 	if err != nil {
 		t.Errorf("Delete returned error: %s", err)
 	}

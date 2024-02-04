@@ -2,17 +2,19 @@ package redis
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type IConnection interface {
-	Auth(password string) error
-	Send(command string) error
-	Receive() (string, error)
+	Auth(ctx context.Context, password string) error
+	Send(ctx context.Context, command string) error
+	Receive(ctx context.Context) (string, error)
 	Close() error
 }
 type Connection struct {
@@ -21,7 +23,10 @@ type Connection struct {
 }
 
 func NewRedisConnection(dialer IDialer, address string, auth string) (IConnection, error) {
-	conn, err := dialer.Dial(address)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := dialer.Dial(ctx, address)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +38,7 @@ func NewRedisConnection(dialer IDialer, address string, auth string) (IConnectio
 
 	if auth != "" {
 		// Authenticate with Redis using the AUTH command
-		if err := rc.Auth(auth); err != nil {
+		if err := rc.Auth(ctx, auth); err != nil {
 			_ = conn.Close()
 			return nil, err
 		}
@@ -42,38 +47,70 @@ func NewRedisConnection(dialer IDialer, address string, auth string) (IConnectio
 	return rc, nil
 }
 
-func (rc *Connection) Auth(password string) error {
-	if err := rc.Send(fmt.Sprintf("AUTH %s", password)); err != nil {
+func (rc *Connection) Auth(ctx context.Context, password string) error {
+	// Check if the context has been canceled before attempting the read operation
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	reply, err := rc.Receive()
+	if err := rc.Send(ctx, fmt.Sprintf("AUTH %s", password)); err != nil {
+		return err
+	}
+	reply, err := rc.Receive(ctx)
 	if err != nil {
 		return err
 	}
-	if reply != "+OK" {
+	if reply != "OK" {
 		return errors.New("authentication failed")
 	}
 	return nil
 }
 
-func (rc *Connection) Send(command string) error {
+func (rc *Connection) Send(ctx context.Context, command string) error {
+	// Check if the context has been canceled before attempting the read operation
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Set deadline for write operation based on context's deadline
+	deadline, ok := ctx.Deadline()
+	if !ok { // Default deadline if none is set
+		deadline = time.Now().Add(5 * time.Second)
+	}
+	if err := rc.conn.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
+
 	_, err := rc.rw.WriteString(command + "\r\n")
 	if err != nil {
 		return err
 	}
+
 	return rc.rw.Flush()
 }
 
-func (rc *Connection) Receive() (string, error) {
+func (rc *Connection) Receive(ctx context.Context) (string, error) {
+	// Check if the context has been canceled before attempting the read operation
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	// Set deadline for read operation based on context's deadline
+	deadline, ok := ctx.Deadline()
+	if !ok { // Default deadline if none is set
+		deadline = time.Now().Add(5 * time.Second)
+	}
+	if err := rc.conn.SetReadDeadline(deadline); err != nil {
+		return "", err
+	}
+
 	line, err := rc.rw.ReadString('\n')
 	if err != nil {
 		return "", err
 	}
-	if line[0] == '-' { // if the response contains - then it's a simple errors
+
+	// Check the first character of the trimmed line
+	switch line[0] {
+	case '-': // Handle simple error
 		return "", fmt.Errorf(strings.TrimSuffix(line[1:], "\r\n"))
-	}
-	//Assume the reply is a bulk string ,array serialization ain't supported in this client
-	if line[0] == '$' {
+	case '$': //Assume the reply is a bulk string ,array serialization ain't supported in this client
 		length, _ := strconv.Atoi(strings.TrimSuffix(line[1:], "\r\n")) //trim the CRLF from our response
 		if length == -1 {
 			// This is a nil reply
@@ -85,8 +122,13 @@ func (rc *Connection) Receive() (string, error) {
 			return "", err
 		}
 		return string(buf[:length]), nil
+	case '+': // Handle simple string, return the string without the '+' prefix
+		return strings.TrimSuffix(line[1:], "\r\n"), nil
+	default:
+		return strings.TrimSuffix(line, "\r\n"), nil
+
 	}
-	return strings.TrimSuffix(line, "\r\n"), nil
+
 }
 
 func (rc *Connection) Close() error {
