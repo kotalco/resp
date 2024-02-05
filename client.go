@@ -137,7 +137,7 @@ func (client *Client) Set(ctx context.Context, key string, value string) error {
 		return err
 	}
 	if response != "OK" {
-		return errors.New("Set: unexpected response from server " + response)
+		return fmt.Errorf("set: unexpected response from server %s", response)
 	}
 	return nil
 }
@@ -152,7 +152,7 @@ func (client *Client) Incr(ctx context.Context, key string) (int, error) {
 	// Parse the response => should be in the format: ":<number>\r\n" for a successful INCR command
 	var newValue int
 	if _, err := fmt.Sscanf(response, ":%d\r\n", &newValue); err != nil {
-		return 0, errors.New("Incr: unexpected response from server " + response)
+		return 0, fmt.Errorf("incr: unexpected response from server %s", response)
 	}
 
 	// Return the new value
@@ -172,7 +172,7 @@ func (client *Client) Expire(ctx context.Context, key string, seconds int) (bool
 	} else if response == ":0" {
 		return false, nil
 	} else {
-		return false, errors.New("Expire: unexpected response from server " + response)
+		return false, fmt.Errorf("expire: unexpected response from server %s", response)
 	}
 }
 
@@ -183,7 +183,7 @@ func (client *Client) SetWithTTL(ctx context.Context, key string, value string, 
 		return err
 	}
 	if response != "OK" {
-		return errors.New("SetWithTTL: unexpected response from server " + response)
+		return fmt.Errorf("setWithTTL: unexpected response from server %s", response)
 	}
 	return nil
 }
@@ -206,7 +206,7 @@ func (client *Client) Delete(ctx context.Context, key string) error {
 	// ":1" for successful deletion of one key.
 	// ":0" If the key does not exist
 	if response != ":1" && response != ":0" {
-		return errors.New("Delete: unexpected response from server " + response)
+		return fmt.Errorf("delete: unexpected response from server %s", response)
 	}
 
 	return nil
