@@ -1,5 +1,5 @@
-# resp-redis
-redis-resp: Go Redis Client with RESP Support
+# RESP
+resp: Go Redis Client with Redis Serialization Protocol (RESP) Support
 A lightweight Redis client package that implements the Redis Serialization Protocol (RESP) for communication with Redis servers. 
 This package is designed to be minimalistic, with no external dependencies, relying solely on TCP networking and Redis serialization protocol (RESP),
 It provides basic methods for caching and rate-limiting operations.
@@ -13,11 +13,7 @@ It provides basic methods for caching and rate-limiting operations.
 
 
 ## Installation
-`go get github.com/kotalco/resp-redis`
+`go get github.com/kotalco/resp`
 
 ## Usage
 see usage in the example folder
-
-## License
-This project is licensed under the MIT License - see the LICENSE file for details.
-

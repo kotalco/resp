@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	redis "github.com/kotalco/resp-redis"
+	"github.com/kotalco/resp"
 	"log"
 	"os"
 	"time"
@@ -20,7 +20,7 @@ func main() {
 	}
 
 	// Initialize a new Redis client.
-	client, err := redis.NewRedisClient(redisAddress, 1, "123456")
+	client, err := resp.NewRedisClient(redisAddress, 1, "123456")
 	if err != nil {
 		log.Fatalf("Error connecting to redis: %s", err)
 	}
