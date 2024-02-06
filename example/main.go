@@ -24,7 +24,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error connecting to redis: %s", err)
 	}
-	defer client.Close()
+	client.Close()
 
 	// Set a key in Redis.
 	key := "test_key"
