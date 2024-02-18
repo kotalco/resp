@@ -213,8 +213,12 @@ func (client *Client) Delete(ctx context.Context, key string) error {
 }
 
 func (client *Client) Close() {
-	close(client.pool)
-	for conn := range client.pool {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	for len(client.pool) > 0 {
+		conn := <-client.pool
 		_ = conn.Close()
 	}
+	close(client.pool)
+
 }

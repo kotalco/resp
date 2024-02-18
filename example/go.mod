@@ -1,7 +1,6 @@
 module github.com/kotalco/resp/example
 
-go 1.21.6
-
+go 1.21
 
 replace github.com/kotalco/resp => ../.
 
