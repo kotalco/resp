@@ -8,6 +8,7 @@ import (
 // Mock objects and helpers
 var (
 	AuthFunc    func(password string) error
+	PingFunc    func(ctx context.Context) error
 	SendFunc    func(command string) error
 	ReceiveFunc func() (string, error)
 	CloseFunc   func() error
@@ -15,6 +16,10 @@ var (
 
 type mockConnection struct {
 	// fields to simulate the Redis connection state
+}
+
+func (m *mockConnection) Ping(ctx context.Context) error {
+	return PingFunc(ctx)
 }
 
 func (m *mockConnection) Auth(ctx context.Context, password string) error {
@@ -54,6 +59,9 @@ func newMockClient(poolSize int, auth string) *Client {
 func TestGetConnection(t *testing.T) {
 	t.Run("acquire connection from the pool", func(t *testing.T) {
 		client := newMockClient(2, "password")
+		PingFunc = func(ctx context.Context) error {
+			return nil
+		}
 		conn, err := client.GetConnection()
 		if err != nil {
 			t.Errorf("GetConnection returned error: %s", err)
