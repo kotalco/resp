@@ -130,6 +130,17 @@ func (client *Client) Do(ctx context.Context, command string) (string, error) {
 
 }
 
+func (client *Client) Ping(ctx context.Context) error {
+	response, err := client.Do(ctx, PingCmd)
+	if err != nil {
+		return err
+	}
+	if response != "PONG" {
+		return errors.New("unexpected response from server")
+	}
+	return nil
+}
+
 func (client *Client) Set(ctx context.Context, key string, value string) error {
 	cmd := fmt.Sprintf(SendCmd, len(key), key, len(value), value)
 	response, err := client.Do(ctx, cmd)
