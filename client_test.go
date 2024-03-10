@@ -59,6 +59,9 @@ func newMockClient(poolSize int, auth string) *Client {
 func TestGetConnection(t *testing.T) {
 	t.Run("acquire connection from the pool", func(t *testing.T) {
 		client := newMockClient(2, "password")
+		PingFunc = func(ctx context.Context) error {
+			return nil
+		}
 		conn, err := client.GetConnection()
 		if err != nil {
 			t.Errorf("GetConnection returned error: %s", err)

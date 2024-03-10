@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	PingCmd       = "PING\n"
 	SendCmd       = "*3\r\n$3\r\nSET\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n"
 	IncrCmd       = "*2\r\n$4\r\nINCR\r\n$%d\r\n%s\r\n"
 	ExpireCmd     = "*3\r\n$6\r\nEXPIRE\r\n$%d\r\n%s\r\n$%d\r\n%d\r\n"
@@ -22,12 +23,15 @@ type IClient interface {
 	GetConnection() (IConnection, error)
 	ReleaseConnection(conn IConnection)
 	Do(ctx context.Context, command string) (string, error)
+	Ping(ctx context.Context) (string, error)
 	Set(ctx context.Context, key string, value string) error
 	SetWithTTL(ctx context.Context, key string, value string, ttl int) error
 	Get(ctx context.Context, key string) (string, error)
 	Delete(ctx context.Context, key string) error
 	Incr(ctx context.Context, key string) (int, error)
 	Expire(ctx context.Context, key string, seconds int) (bool, error)
+	Pool() chan IConnection
+	PoolSize() int
 	Close()
 }
 
@@ -73,7 +77,7 @@ func (client *Client) GetConnection() (IConnection, error) {
 	case conn := <-client.pool:
 		return conn, nil
 	default:
-		// Pool is empty now all connection are being used , create a new connection till some connections get released
+		// pool is empty now all connection are being used , create a new connection till some connections get released
 		conn, err := NewRedisConnection(client.dialer, client.address, client.auth)
 		if err != nil {
 			return nil, err
@@ -85,7 +89,9 @@ func (client *Client) GetConnection() (IConnection, error) {
 func (client *Client) ReleaseConnection(conn IConnection) {
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if len(client.pool) >= client.poolSize {
+
+	err := conn.Ping(context.Background())
+	if len(client.pool) >= client.poolSize || err != nil {
 		err := conn.Close()
 		if err != nil {
 			return
@@ -130,15 +136,15 @@ func (client *Client) Do(ctx context.Context, command string) (string, error) {
 
 }
 
-func (client *Client) Ping(ctx context.Context) error {
+func (client *Client) Ping(ctx context.Context) (string, error) {
 	response, err := client.Do(ctx, PingCmd)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if response != "PONG" {
-		return errors.New("unexpected response from server")
+		return "", errors.New("unexpected response from server")
 	}
-	return nil
+	return response, nil
 }
 
 func (client *Client) Set(ctx context.Context, key string, value string) error {
@@ -232,4 +238,11 @@ func (client *Client) Close() {
 	}
 	close(client.pool)
 
+}
+
+func (client *Client) Pool() chan IConnection {
+	return client.pool
+}
+func (client *Client) PoolSize() int {
+	return client.poolSize
 }
