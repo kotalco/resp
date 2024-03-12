@@ -41,50 +41,14 @@ func (m *mockConnection) Close() error {
 // Helper function to create a Client with a mock dialer and connection
 func newMockClient(poolSize int, auth string) *Client {
 	client := &Client{
-		pool:     make(chan IConnection, poolSize),
-		address:  "localhost:6379",
-		poolSize: poolSize,
-		auth:     auth,
-		dialer:   &MockDialer{},
+		address: "localhost:6379",
+		auth:    auth,
+		dialer:  &MockDialer{},
 	}
 
-	for i := 0; i < poolSize; i++ {
-		client.pool <- &mockConnection{}
-	}
+	client.conn = &mockConnection{}
 
 	return client
-}
-
-// TestGetConnection tests acquiring a connection from the pool
-func TestGetConnection(t *testing.T) {
-	t.Run("acquire connection from the pool", func(t *testing.T) {
-		client := newMockClient(2, "password")
-		PingFunc = func(ctx context.Context) error {
-			return nil
-		}
-		conn, err := client.GetConnection()
-		if err != nil {
-			t.Errorf("GetConnection returned error: %s", err)
-		}
-		if conn == nil {
-			t.Errorf("GetConnection returned nil connection")
-		}
-	})
-}
-
-// TestReleaseConnection tests releasing a connection back to the pool
-func TestReleaseConnection(t *testing.T) {
-	t.Run("Release the connection back to the pool", func(t *testing.T) {
-		client := newMockClient(2, "password")
-		conn, _ := client.GetConnection()
-		CloseFunc = func() error {
-			return nil
-		}
-		client.ReleaseConnection(conn) //releases the connection back to the pool
-		if len(client.pool) != 2 {
-			t.Errorf("ReleaseConnection did not release the connection back to the pool")
-		}
-	})
 }
 
 // TestDo tests sending a command to the Redis server
@@ -204,8 +168,8 @@ func TestClose(t *testing.T) {
 		return nil
 	}
 	client := newMockClient(2, "password")
-	client.Close()
-	if _, ok := <-client.pool; ok {
+	err := client.Close()
+	if err != nil {
 		t.Errorf("Close did not close the channel")
 	}
 }

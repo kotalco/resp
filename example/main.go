@@ -20,7 +20,7 @@ func main() {
 	}
 
 	// Initialize a new Redis client.
-	client, err := resp.NewRedisClient(redisAddress, 1, "123456")
+	client, err := resp.NewRedisClient(redisAddress, "")
 	if err != nil {
 		log.Fatalf("Error connecting to redis: %s", err)
 	}
